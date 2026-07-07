@@ -58,14 +58,14 @@ for e in data.get('entries', []):
         color=$(pick_color)
         echo "[quran] Playing: $title"
 
-        ffmpeg -re -thread_queue_size 512 \
-            -f lavfi -i "color=c=$color:s=1280x720:r=10" \
+        ffmpeg -nostdin -re -thread_queue_size 512 \
+            -f lavfi -i "color=c=$color:s=1280x720:r=5" \
             -i "$audio_url" \
-            -c:v libx264 -preset ultrafast -b:v 300k -r 10 -g 30 \
-            -c:a aac -b:a 96k \
+            -c:v libx264 -preset ultrafast -b:v 200k -r 5 -g 15 \
+            -c:a aac -b:a 64k \
             -shortest \
             -f flv "$OUTPUT_URL" \
-            -loglevel warning -stats 2>&1
+            -loglevel warning -stats 2>&1 </dev/null
 
         echo "[quran] Track ended, next in 3s..."
         sleep 3
