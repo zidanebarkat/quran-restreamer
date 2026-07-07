@@ -63,7 +63,7 @@ for e in data.get('entries', []):
             -i "$audio_url" \
             -c:v libx264 -preset ultrafast -b:v 300k -r 10 -g 30 \
             -c:a aac -b:a 96k \
-            -shortest -fflags +shortest \
+            -shortest \
             -f flv "$OUTPUT_URL" \
             -loglevel warning -stats 2>&1
 
