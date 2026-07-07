@@ -22,45 +22,38 @@ download_bg() {
 
 download_bg
 
-get_audio_url() {
-    url=$(yt-dlp -g "$1" 2>/dev/null | tail -1)
-    echo "$url"
-}
-
-get_title() {
-    yt-dlp --get-title "$1" 2>/dev/null || echo "Track"
-}
-
 while true; do
     echo "[quran] Fetching audio URL..."
-    audio_url=$(get_audio_url "$PLAYLIST_URL")
-    title=$(get_title "$PLAYLIST_URL")
+    audio_url=$(yt-dlp -f http_mp3_0_1 -g "$PLAYLIST_URL" 2>/dev/null)
+    title=$(yt-dlp --get-title "$PLAYLIST_URL" 2>/dev/null || echo "Track")
     if [ -z "$audio_url" ]; then
-        echo "[quran] Failed to get audio URL, retrying in 5s..."
+        echo "[quran] Failed to get URL, retrying in 5s..."
         sleep 5
         continue
     fi
 
-    echo "[quran] Playing: $title"
+    echo "[quran] Downloading: $title"
+    rm -f /tmp/track.mp3
+    curl -sL -o /tmp/track.mp3 "$audio_url"
+    if [ ! -s /tmp/track.mp3 ]; then
+        echo "[quran] Download failed, retrying..."
+        sleep 5
+        continue
+    fi
+    echo "[quran] Downloaded ($(du -h /tmp/track.mp3 | cut -f1))"
 
-    while true; do
-        start=$(date +%s)
-        ffmpeg -nostdin -re -stream_loop -1 -i /tmp/bg.mp4 \
-            -i "$audio_url" \
-            -map 0:v -map 1:a \
-            -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2" \
-            -c:v libx264 -preset ultrafast -b:v 1500k -maxrate 2000k -bufsize 3000k -r 10 -g 30 \
-            -c:a aac -b:a 128k \
-            -shortest \
-            -rtmp_live live \
-            -f flv \
-            "$OUTPUT_URL" \
-            -loglevel warning -stats 2>&1 </dev/null
-        rc=$?
-        elapsed=$(( $(date +%s) - start ))
-        echo "[quran] ffmpeg exit=$rc after ${elapsed}s"
-        [ "$elapsed" -ge 10 ] && break
-        echo "[quran] Track too short, getting fresh URL..."
-        audio_url=$(get_audio_url "$PLAYLIST_URL")
-    done
+    echo "[quran] Streaming continuously..."
+    ffmpeg -nostdin -re -stream_loop -1 -i /tmp/bg.mp4 \
+        -stream_loop -1 -i /tmp/track.mp3 \
+        -map 0:v -map 1:a \
+        -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2" \
+        -c:v libx264 -preset ultrafast -b:v 1500k -maxrate 2000k -bufsize 3000k -r 10 -g 30 \
+        -c:a aac -b:a 128k \
+        -rtmp_live live \
+        -f flv \
+        "$OUTPUT_URL" \
+        -loglevel warning -stats 2>&1 </dev/null
+
+    echo "[quran] Stream stopped, refreshing audio..."
+    sleep 2
 done
