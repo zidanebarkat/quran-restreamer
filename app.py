@@ -580,7 +580,6 @@ function updateStatus() {
       document.getElementById('btnGoLive').disabled = false;
       document.getElementById('btnStop').disabled = true;
     }
-    if(d.config) applyForm(d.config);
   }).catch(()=>{});
 }
 function fetchLogs() {
@@ -616,7 +615,7 @@ function sourceInfo() {
       String(i+1).padStart(3,'0')+'. '+t+'</span>').join('\n');
   }).catch(e=>{ box.innerHTML = 'Failed: '+e; });
 }
-updateStatus();
+fetch('/status').then(r=>r.json()).then(d=>{ if(d.config) applyForm(d.config); });
 setInterval(updateStatus, 3000);
 setInterval(fetchLogs, 2000);
 </script>
