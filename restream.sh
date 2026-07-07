@@ -11,28 +11,44 @@ pick_color() {
     local h=$(date +%H)
     if [ "$h" -ge 6 ] && [ "$h" -lt 12 ]; then
         echo "0x1a237e"   # morning deep blue
-    elif [ "$h" -ge 12 ] && [ "$h" -lt 18 ]; then
+    elif [ "$h" -ge 12 ] && [ "$h" -lt 17 ]; then
         echo "0x004d40"   # afternoon dark green
-    elif [ "$h" -ge 18 ] && [ "$h" -lt 20 ]; then
+    elif [ "$h" -ge 17 ] && [ "$h" -lt 19 ]; then
         echo "0x4a148c"   # evening purple
     else
         echo "0x0a1628"   # night dark blue
     fi
 }
 
+get_track_title() {
+    yt-dlp --get-title "$1" 2>/dev/null
+}
+
 while true; do
     echo "[quran] Fetching playlist..."
-    yt-dlp --flat-playlist --get-url "$PLAYLIST_URL" 2>/dev/null > /tmp/playlist.txt
-    if [ ! -s /tmp/playlist.txt ]; then
+    yt-dlp --flat-playlist --dump-single-json "$PLAYLIST_URL" 2>/dev/null > /tmp/playlist.json
+    if [ ! -s /tmp/playlist.json ]; then
         echo "[quran] Failed to fetch playlist, retrying in 30s..."
         sleep 30
         continue
     fi
 
+    python3 -c "
+import json
+with open('/tmp/playlist.json') as f:
+    data = json.load(f)
+for e in data.get('entries', []):
+    print(e.get('url', ''))
+" > /tmp/playlist_urls.txt
+
+    track_num=0
     while IFS= read -r track_url; do
         [ -z "$track_url" ] && continue
-        echo "[quran] Getting audio URL for: $track_url"
+        track_num=$((track_num + 1))
+
+        echo "[quran] ($track_num) Getting audio..."
         audio_url=$(yt-dlp -g "$track_url" 2>/dev/null | tail -1)
+        title=$(get_track_title "$track_url" 2>/dev/null || echo "Track $track_num")
         if [ -z "$audio_url" ]; then
             echo "[quran] Failed to get audio, skipping..."
             sleep 2
@@ -40,20 +56,20 @@ while true; do
         fi
 
         color=$(pick_color)
-        echo "[quran] Playing track with color=$color"
+        echo "[quran] Playing: $title"
 
-        ffmpeg -re \
+        ffmpeg -re -thread_queue_size 512 \
             -f lavfi -i "color=c=$color:s=1280x720:r=10" \
             -i "$audio_url" \
             -c:v libx264 -preset ultrafast -b:v 300k -r 10 -g 30 \
             -c:a aac -b:a 96k \
-            -shortest \
+            -shortest -fflags +shortest \
             -f flv "$OUTPUT_URL" \
             -loglevel warning -stats 2>&1
 
         echo "[quran] Track ended, next in 3s..."
         sleep 3
-    done < /tmp/playlist.txt
+    done < /tmp/playlist_urls.txt
 
     echo "[quran] Playlist finished, restarting from beginning..."
     sleep 10
