@@ -132,52 +132,91 @@ def bg_loop(cfg):
             wr('No tracks found, retrying in 30s...')
             time.sleep(30)
             continue
+        wr(f'Loaded {len(tracks)} tracks, will cycle through all')
 
-        playlist_path = '/tmp/playlist.txt'
-        with open(playlist_path, 'w') as f:
-            for t in tracks:
-                f.write(f"file '{t}'\n")
-        wr(f'Generated playlist with {len(tracks)} tracks (001 → {os.path.basename(tracks[-1])})')
+        track_idx = 0
+        pre_downloaded = False
+        while stream_active and track_idx < len(tracks):
+            track_url = tracks[track_idx]
+            track_name = os.path.basename(track_url)
 
-        wr('Starting ffmpeg with playlist...')
-        cmd = ['ffmpeg', '-nostdin', '-re',
-            '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
-            '-stream_loop', '-1',
-            '-f', 'concat', '-safe', '0',
-            '-i', playlist_path,
-            '-i', '/tmp/bg.mp4',
-            '-map', '1:v', '-map', '0:a',
-            '-c:v', 'copy',
-            '-c:a', 'aac', '-b:a', bitrate,
-            '-rtmp_live', 'live',
-            '-f', 'flv', output]
-        wr(f'ffmpeg: concat playlist, -c:v copy -c:a aac -b:a {bitrate}')
+            if not pre_downloaded:
+                wr(f'Downloading track {track_idx+1}/{len(tracks)}: {track_name}...')
+                try:
+                    subprocess.run(['rm', '-f', '/tmp/current.mp3'], capture_output=True)
+                    subprocess.run(['curl', '-sL', '--max-time', '30', track_url, '-o', '/tmp/current.mp3'],
+                        check=True, timeout=60, capture_output=True)
+                    if not os.path.getsize('/tmp/current.mp3') > 0:
+                        raise Exception('empty')
+                    wr(f'Downloaded {track_name}')
+                except Exception as e:
+                    wr(f'Download failed: {e}, skipping...')
+                    track_idx += 1
+                    time.sleep(2)
+                    continue
+            pre_downloaded = False
 
-        try:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                 preexec_fn=os.setsid)
-        except Exception as e:
-            wr(f'ffmpeg spawn failed: {e}')
-            time.sleep(5)
-            continue
+            next_idx = track_idx + 1
+            if next_idx >= len(tracks):
+                next_idx = 0
+            next_url = tracks[next_idx]
+            next_name = os.path.basename(next_url)
 
-        ffmpeg_proc = p
-        for line in iter(p.stdout.readline, b''):
-            if not stream_active:
-                kill_ffmpeg()
-                break
-            text = line.decode('utf-8', errors='replace').strip()
-            if text and 'size=' in text and 'time=' in text:
-                pass
-            elif text:
-                wr(text)
-        p.wait()
-        rc = p.returncode
-        wr(f'ffmpeg exited ({rc})')
-        ffmpeg_proc = None
-        if not stream_active:
-            break
-        wr('Playlist ended, rescraping and restarting...')
+            def preload_next():
+                try:
+                    subprocess.run(['curl', '-sL', '--max-time', '30', next_url, '-o', '/tmp/next.mp3'],
+                        check=True, timeout=60, capture_output=True)
+                except:
+                    pass
+
+            wr(f'Streaming {track_name}, pre-loading next: {next_name}...')
+            cmd = ['ffmpeg', '-nostdin', '-re',
+                '-stream_loop', '-1', '-i', '/tmp/bg.mp4',
+                '-i', '/tmp/current.mp3',
+                '-map', '0:v', '-map', '1:a',
+                '-c:v', 'copy',
+                '-c:a', 'aac', '-b:a', bitrate,
+                '-shortest',
+                '-rtmp_live', 'live',
+                '-f', 'flv', output]
+
+            try:
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     preexec_fn=os.setsid)
+            except Exception as e:
+                wr(f'ffmpeg spawn failed: {e}')
+                track_idx += 1
+                time.sleep(5)
+                continue
+
+            ffmpeg_proc = p
+            preload_thread = threading.Thread(target=preload_next, daemon=True)
+            preload_thread.start()
+
+            for line in iter(p.stdout.readline, b''):
+                if not stream_active:
+                    kill_ffmpeg()
+                    break
+                text = line.decode('utf-8', errors='replace').strip()
+                if text and 'size=' in text and 'time=' in text:
+                    pass
+                elif text:
+                    wr(text)
+            p.wait()
+            rc = p.returncode
+            wr(f'{track_name} finished (exit {rc})')
+            ffmpeg_proc = None
+
+            if os.path.exists('/tmp/next.mp3') and os.path.getsize('/tmp/next.mp3') > 0:
+                os.rename('/tmp/next.mp3', '/tmp/current.mp3')
+                pre_downloaded = True
+
+            track_idx += 1
+            if track_idx >= len(tracks):
+                wr(f'Reached last track, looping back to 001')
+                track_idx = 0
+
+        wr('Track cycle complete, rescraping...')
         time.sleep(2)
 
     wr('Stream stopped')
