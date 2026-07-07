@@ -253,6 +253,57 @@ def preview():
         'bg_direct': get_bg_direct_url(cfg['bg_url'])
     })
 
+preview_clip_lock = threading.Lock()
+@app.route('/preview_clip')
+def preview_clip():
+    if not preview_clip_lock.acquire(blocking=False):
+        return jsonify({'ok': False, 'error': 'Already generating'}), 429
+    try:
+        cfg = load_config()
+        tracks = scrape_tracks(cfg['source_url'])
+        if not tracks:
+            return jsonify({'ok': False, 'error': 'No tracks'}), 400
+        first_url = tracks[0]
+        bg_url = cfg['bg_url']
+        wr('Generating preview clip...')
+        clip_path = '/tmp/preview_clip.mp4'
+        subprocess.run(['rm', '-f', clip_path], capture_output=True)
+
+        subprocess.run(['curl', '-sL', '-o', '/tmp/_p_bg.mp4', bg_url],
+            check=True, timeout=60, capture_output=True)
+        subprocess.run(['curl', '-sL', '-o', '/tmp/_p_audio.mp3', first_url],
+            check=True, timeout=60, capture_output=True)
+
+        subprocess.run(['ffmpeg', '-nostdin', '-y',
+            '-i', '/tmp/_p_bg.mp4',
+            '-i', '/tmp/_p_audio.mp3',
+            '-map', '0:v', '-map', '1:a',
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-t', '15',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-pix_fmt', 'yuv420p',
+            clip_path], check=True, timeout=120, capture_output=True)
+
+        os.remove('/tmp/_p_bg.mp4')
+        os.remove('/tmp/_p_audio.mp3')
+
+        if not os.path.exists(clip_path):
+            return jsonify({'ok': False, 'error': 'Failed to generate'}), 500
+
+        wr('Preview clip ready')
+        return jsonify({'ok': True, 'url': '/clip.mp4'})
+    except Exception as e:
+        wr(f'Preview clip failed: {e}')
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    finally:
+        preview_clip_lock.release()
+
+@app.route('/clip.mp4')
+def serve_clip():
+    path = '/tmp/preview_clip.mp4'
+    if not os.path.exists(path):
+        return 'Not found', 404
+    return open(path, 'rb').read(), 200, {'Content-Type': 'video/mp4'}
+
 @app.route('/status')
 def get_status():
     return jsonify({
@@ -408,30 +459,23 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
   <h2>🎬 Studio Preview</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
     <div>
-      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Background Video</label>
-      <div style="background:#000;border-radius:6px;overflow:hidden;max-height:200px">
-        <video id="bgPreview" controls muted loop style="width:100%;max-height:200px;display:block"
-          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect fill='%23161b22' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' fill='%238b949e' font-family='sans-serif' font-size='14' text-anchor='middle' dy='.3em'%3ELoad preview%3C/text%3E%3C/svg%3E">
+      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Combined Stream Preview (bg + audio)</label>
+      <div style="background:#000;border-radius:6px;overflow:hidden;max-height:240px">
+        <video id="combinedPreview" controls style="width:100%;max-height:240px;display:block"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect fill='%23161b22' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' fill='%238b949e' font-family='sans-serif' font-size='14' text-anchor='middle' dy='.3em'%3EGenerate preview%3C/text%3E%3C/svg%3E">
           Your browser doesn't support video.
         </video>
       </div>
-      <button class="btn btn-grey btn-sm" onclick="loadPreview()" style="margin-top:8px">▶ Load Video</button>
+      <button class="btn btn-grey btn-sm" onclick="generateCombinedPreview()" style="margin-top:8px">🎬 Generate Combined Preview (15s)</button>
       <span id="previewInfo" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
-      <div style="margin-top:10px">
-        <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:4px">Audio Preview (first track)</label>
-        <audio id="audioPreview" controls style="width:100%" preload="none">
-          Your browser doesn't support audio.
-        </audio>
-        <button class="btn btn-grey btn-sm" onclick="loadAudioPreview()" style="margin-top:4px">🔊 Load Audio</button>
-        <span id="audioInfo" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
-      </div>
+      <div id="previewProgress" style="font-size:12px;color:#d29922;margin-top:4px;display:none">Generating...</div>
     </div>
     <div>
-      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Audio Tracks</label>
+      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Source Info</label>
       <div id="trackList" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;height:240px;overflow-y:auto;font-size:12px;font-family:monospace;color:#8b949e">
-        Click "Scan Source" to load tracks
+        Generate preview to verify source
       </div>
-      <button class="btn btn-grey btn-sm" onclick="scanTracks()" style="margin-top:8px">📡 Scan Source</button>
+      <button class="btn btn-grey btn-sm" onclick="sourceInfo()" style="margin-top:8px">📡 Source Info</button>
       <span id="trackCount" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
     </div>
   </div>
@@ -507,29 +551,22 @@ function fetchLogs() {
     box.scrollTop = box.scrollHeight;
   }).catch(()=>{});
 }
-function loadPreview() {
-  const vid = document.getElementById('bgPreview');
+function generateCombinedPreview() {
+  const vid = document.getElementById('combinedPreview');
   const info = document.getElementById('previewInfo');
-  info.textContent = 'Loading...';
-  fetch('/preview').then(r=>r.json()).then(d=>{
+  const prog = document.getElementById('previewProgress');
+  info.textContent = '';
+  prog.style.display = 'block';
+  prog.textContent = 'Generating 15s preview (bg + audio)...';
+  fetch('/preview_clip').then(r=>r.json()).then(d=>{
+    prog.style.display = 'none';
     if(!d.ok) { info.textContent = 'Error: '+d.error; return; }
-    vid.src = d.bg_direct || d.bg_url;
+    vid.src = d.url;
     vid.play().catch(()=>{});
-    info.textContent = d.total_tracks+' tracks · '+d.first_track+' ('+(d.duration_s||'?')+'s)';
-  }).catch(e=>{ info.textContent = 'Failed'; });
+    info.textContent = 'Ready — bg + first track combined';
+  }).catch(e=>{ prog.style.display = 'none'; info.textContent = 'Failed: '+e; });
 }
-function loadAudioPreview() {
-  const aud = document.getElementById('audioPreview');
-  const info = document.getElementById('audioInfo');
-  info.textContent = 'Loading...';
-  fetch('/preview').then(r=>r.json()).then(d=>{
-    if(!d.ok) { info.textContent = 'Error: '+d.error; return; }
-    aud.src = d.first_url;
-    aud.play().catch(()=>{});
-    info.textContent = d.first_track;
-  }).catch(e=>{ info.textContent = 'Failed'; });
-}
-function scanTracks() {
+function sourceInfo() {
   const box = document.getElementById('trackList');
   const cnt = document.getElementById('trackCount');
   box.innerHTML = 'Scanning...';
