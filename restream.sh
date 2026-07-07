@@ -1,5 +1,5 @@
 #!/bin/bash
-PLAYLIST_URL="${PLAYLIST_URL:-https://soundcloud.com/slina-r/dgbfmanr9xd3}"
+PLAYLIST_URL="${PLAYLIST_URL:-https://archive.org/details/lifeways11_gmail_001_20180201_0110}"
 OUTPUT_URL="${OUTPUT_URL:-rtmps://a.rtmp.youtube.com:443/live2/ru33-pe6q-z9gr-a2es-5t82}"
 BG_URL="${BG_URL:-https://assets.mixkit.co/videos/22728/22728-720.mp4}"
 
@@ -30,23 +30,18 @@ if [ ! -f /tmp/bg.mp4 ]; then
 fi
 
 while true; do
-    echo "[quran] Fetching audio URL..."
-    audio_url=$(yt-dlp -f http_mp3_0_1 -g "$PLAYLIST_URL" 2>/dev/null)
+    echo "[quran] Fetching..."
     title=$(yt-dlp --get-title "$PLAYLIST_URL" 2>/dev/null || echo "Track")
-    if [ -z "$audio_url" ]; then
-        echo "[quran] Failed to get URL, retrying..."
-        sleep 5
-        continue
-    fi
-
-    echo "[quran] Downloading: $title"
-    rm -f /tmp/track.mp3
-    curl -sL -o /tmp/track.mp3 "$audio_url"
+    rm -f /tmp/track.*
+    yt-dlp -f bestaudio -x --audio-format mp3 -o "/tmp/track.%(ext)s" "$PLAYLIST_URL" >/dev/null 2>&1
+    # yt-dlp may output .mp3 or other extension, ensure we have /tmp/track.mp3
+    [ ! -f /tmp/track.mp3 ] && for f in /tmp/track.*; do [ -f "$f" ] && mv "$f" /tmp/track.mp3 && break; done 2>/dev/null
     if [ ! -s /tmp/track.mp3 ]; then
         echo "[quran] Download failed, retrying..."
         sleep 5
         continue
     fi
+    echo "[quran] Downloaded: $title ($(du -h /tmp/track.mp3 | cut -f1))"
     echo "[quran] Downloaded ($(du -h /tmp/track.mp3 | cut -f1))"
 
     echo "[quran] Streaming continuously..."
