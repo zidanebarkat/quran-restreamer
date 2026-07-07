@@ -1,6 +1,6 @@
 #!/bin/bash
 PLAYLIST_URL="${PLAYLIST_URL:-https://soundcloud.com/alzahra-alkindi/sets/clige9q6twbc}"
-OUTPUT_URL="${OUTPUT_URL:-https://a.upload.youtube.com/live_hls/live2/rx01-ut1s-w8h3-cgr2-1qvu/playlist.m3u8}"
+OUTPUT_URL="${OUTPUT_URL:-rtmps://a.rtmp.youtube.com:443/live2/ru33-pe6q-z9gr-a2es-5t82}"
 
 echo "[quran] Starting..."
 echo "[quran] PLAYLIST_URL=$PLAYLIST_URL"
@@ -64,9 +64,8 @@ for e in data.get('entries', []):
             -c:v libx264 -preset ultrafast -b:v 200k -r 5 -g 15 \
             -c:a aac -b:a 64k \
             -shortest \
-            -f hls -hls_time 4 -hls_list_size 6 \
-            -hls_segment_type mpegts \
-            -method PUT \
+            -rtmp_live live \
+            -f flv \
             "$OUTPUT_URL" \
             -loglevel warning -stats 2>&1 </dev/null
 
