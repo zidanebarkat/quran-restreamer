@@ -77,6 +77,24 @@ def scrape_tracks(url):
         wr(f'Scrape failed: {e}')
         return []
 
+def get_bg_direct_url(bg_url):
+    for ext in ['.mp4', '.webm', '.mov']:
+        base = bg_url.rsplit('.', 1)[0] if '.' in bg_url.split('/')[-1] else bg_url
+        if bg_url.endswith(ext):
+            return bg_url
+    return bg_url
+
+def probe_duration(path_or_url):
+    try:
+        r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', path_or_url],
+            capture_output=True, text=True, timeout=30)
+        if r.returncode == 0 and r.stdout.strip():
+            return round(float(r.stdout.strip()), 1)
+    except:
+        pass
+    return None
+
 def bg_loop(cfg):
     global stream_active, ffmpeg_proc
     source = cfg['source_url']
@@ -207,6 +225,34 @@ def update_config():
     wr('Config saved')
     return jsonify({'ok': True, 'config': cfg})
 
+@app.route('/tracks')
+def get_tracks():
+    cfg = load_config()
+    tracks = scrape_tracks(cfg['source_url'])
+    return jsonify({
+        'count': len(tracks),
+        'tracks': [os.path.basename(t) for t in tracks],
+        'urls': tracks
+    })
+
+@app.route('/preview')
+def preview():
+    cfg = load_config()
+    tracks = scrape_tracks(cfg['source_url'])
+    if not tracks:
+        return jsonify({'ok': False, 'error': 'No tracks found'})
+    first_url = tracks[0]
+    dur = probe_duration(first_url)
+    return jsonify({
+        'ok': True,
+        'first_track': os.path.basename(first_url),
+        'first_url': first_url,
+        'duration_s': dur,
+        'total_tracks': len(tracks),
+        'bg_url': cfg['bg_url'],
+        'bg_direct': get_bg_direct_url(cfg['bg_url'])
+    })
+
 @app.route('/status')
 def get_status():
     return jsonify({
@@ -276,7 +322,7 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
 </head>
 <body>
 <div class="container">
-<h1>🎬 Stream Panel <small>v4</small></h1>
+<h1>🎬 Stream Panel <small>v5</small></h1>
 <div class="status-bar" id="statusBar">
   <span><span class="status-dot" id="statusDot"></span><span class="status-text" id="statusText">Checking...</span></span>
 </div>
@@ -357,6 +403,31 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
     <div class="log-box" id="logBox">Waiting...</div>
   </div>
 </div>
+
+<div class="card" style="margin-top:20px">
+  <h2>🎬 Studio Preview</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div>
+      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Background Video</label>
+      <div style="background:#000;border-radius:6px;overflow:hidden;max-height:240px">
+        <video id="bgPreview" controls muted loop style="width:100%;max-height:240px;display:block"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect fill='%23161b22' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' fill='%238b949e' font-family='sans-serif' font-size='14' text-anchor='middle' dy='.3em'%3ELoad preview%3C/text%3E%3C/svg%3E">
+          Your browser doesn't support video.
+        </video>
+      </div>
+      <button class="btn btn-grey btn-sm" onclick="loadPreview()" style="margin-top:8px">▶ Load Preview</button>
+      <span id="previewInfo" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
+    </div>
+    <div>
+      <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Audio Tracks</label>
+      <div id="trackList" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;height:240px;overflow-y:auto;font-size:12px;font-family:monospace;color:#8b949e">
+        Click "Scan Source" to load tracks
+      </div>
+      <button class="btn btn-grey btn-sm" onclick="scanTracks()" style="margin-top:8px">📡 Scan Source</button>
+      <span id="trackCount" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
+    </div>
+  </div>
+</div>
 </div>
 <script>
 function applyForm(c) {
@@ -427,6 +498,28 @@ function fetchLogs() {
     if(t) box.innerHTML = t;
     box.scrollTop = box.scrollHeight;
   }).catch(()=>{});
+}
+function loadPreview() {
+  const vid = document.getElementById('bgPreview');
+  const info = document.getElementById('previewInfo');
+  info.textContent = 'Loading...';
+  fetch('/preview').then(r=>r.json()).then(d=>{
+    if(!d.ok) { info.textContent = 'Error: '+d.error; return; }
+    vid.src = d.bg_direct || d.bg_url;
+    vid.play().catch(()=>{});
+    info.textContent = d.total_tracks+' tracks · '+d.first_track+' ('+(d.duration_s||'?')+'s)';
+  }).catch(e=>{ info.textContent = 'Failed'; });
+}
+function scanTracks() {
+  const box = document.getElementById('trackList');
+  const cnt = document.getElementById('trackCount');
+  box.innerHTML = 'Scanning...';
+  fetch('/tracks').then(r=>r.json()).then(d=>{
+    cnt.textContent = d.count+' tracks';
+    if(d.tracks.length===0) { box.innerHTML = 'No tracks found'; return; }
+    box.innerHTML = d.tracks.map((t,i)=>'<span style="color:'+(i===0?'#58a6ff':'#8b949e')+'">'+
+      String(i+1).padStart(3,'0')+'. '+t+'</span>').join('\n');
+  }).catch(e=>{ box.innerHTML = 'Failed: '+e; });
 }
 updateStatus();
 setInterval(updateStatus, 3000);
