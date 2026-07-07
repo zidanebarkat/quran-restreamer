@@ -61,8 +61,8 @@ for e in data.get('entries', []):
         ffmpeg -nostdin -re -thread_queue_size 512 \
             -f lavfi -i "color=c=$color:s=1280x720:r=5" \
             -i "$audio_url" \
-            -c:v libx264 -preset ultrafast -b:v 200k -r 5 -g 15 \
-            -c:a aac -b:a 64k \
+            -c:v libx264 -preset veryfast -b:v 2000k -maxrate 2200k -bufsize 4000k -r 10 -g 30 \
+            -c:a aac -b:a 128k \
             -shortest \
             -rtmp_live live \
             -f flv \
