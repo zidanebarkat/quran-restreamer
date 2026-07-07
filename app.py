@@ -108,10 +108,6 @@ def bg_loop(cfg):
         stream_active = False
         return
 
-    af = f'volume={volume}'
-    if pitch_enabled:
-        af += f',asetrate=46000,aresample={sample_rate}'
-
     while stream_active:
         tracks = scrape_tracks(source)
         if not tracks:
@@ -134,8 +130,6 @@ def bg_loop(cfg):
             '-i', '/tmp/bg.mp4',
             '-map', '1:v', '-map', '0:a',
             '-c:v', 'copy',
-            '-af', af,
-            '-ar', sample_rate,
             '-c:a', 'aac', '-b:a', bitrate,
             '-rtmp_live', 'live',
             '-f', 'flv', output]
@@ -282,7 +276,7 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
 </head>
 <body>
 <div class="container">
-<h1>🎬 Stream Panel <small>v3</small></h1>
+<h1>🎬 Stream Panel <small>v4</small></h1>
 <div class="status-bar" id="statusBar">
   <span><span class="status-dot" id="statusDot"></span><span class="status-text" id="statusText">Checking...</span></span>
 </div>
@@ -302,20 +296,14 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
         <label>Background Video URL</label>
         <input type="url" name="bg_url" id="bg_url" placeholder="https://...mp4">
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Audio Bitrate</label>
-          <select name="bitrate" id="bitrate">
-            <option value="128k">128 kbps</option>
-            <option value="192k" selected>192 kbps</option>
-            <option value="256k">256 kbps</option>
-            <option value="320k">320 kbps</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Volume</label>
-          <input type="number" name="volume" id="volume" min="0.5" max="3" step="0.1">
-        </div>
+      <div class="form-group">
+        <label>Audio Bitrate</label>
+        <select name="bitrate" id="bitrate">
+          <option value="128k">128 kbps</option>
+          <option value="192k" selected>192 kbps</option>
+          <option value="256k">256 kbps</option>
+          <option value="320k">320 kbps</option>
+        </select>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -352,15 +340,6 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
             <option value="44100">44100 Hz</option>
             <option value="48000">48000 Hz</option>
           </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <div class="toggle-group">
-          <label class="toggle">
-            <input type="checkbox" name="pitch" id="pitch">
-            <span class="slider"></span>
-          </label>
-          <span class="toggle-label">Pitch Shift (anti Content ID)</span>
         </div>
       </div>
       <div style="margin-top:12px;display:flex;gap:8px">
