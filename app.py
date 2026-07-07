@@ -1,5 +1,5 @@
 from flask import Flask, Response, request, jsonify
-import subprocess, os, signal, sys, threading, time, json
+import subprocess, os, signal, sys, threading, time, json, re, urllib.request
 
 app = Flask(__name__)
 
@@ -57,6 +57,26 @@ def kill_ffmpeg():
                 pass
     ffmpeg_proc = None
 
+def scrape_tracks(url):
+    wr(f'Scraping tracks from {url}...')
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        html = urllib.request.urlopen(req, timeout=15).read().decode('utf-8', errors='replace')
+        pattern = re.compile(r'href="(https://archive\.org/download/[^"]+\.mp3)"', re.I)
+        matches = pattern.findall(html)
+        if not matches:
+            pattern = re.compile(r'href="(/download/[^"]+\.mp3)"', re.I)
+            matches = ['https://archive.org' + m for m in pattern.findall(html)]
+        seen = []
+        for m in matches:
+            if m not in seen:
+                seen.append(m)
+        wr(f'Found {len(seen)} tracks')
+        return seen
+    except Exception as e:
+        wr(f'Scrape failed: {e}')
+        return []
+
 def bg_loop(cfg):
     global stream_active, ffmpeg_proc
     source = cfg['source_url']
@@ -88,43 +108,38 @@ def bg_loop(cfg):
         stream_active = False
         return
 
+    af = f'volume={volume}'
+    if pitch_enabled:
+        af += f',asetrate=46000,aresample={sample_rate}'
+
     while stream_active:
-        wr('Downloading audio...')
-        try:
-            subprocess.run(['rm', '-f', '/tmp/track.*'], capture_output=True)
-            subprocess.run(['yt-dlp', '-f', 'bestaudio', '-x', '--audio-format', 'mp3',
-                '-o', '/tmp/track.%(ext)s', source], check=True, timeout=120, capture_output=True)
-            if not os.path.exists('/tmp/track.mp3'):
-                for f in os.listdir('/tmp'):
-                    if f.startswith('track.'):
-                        os.rename(f'/tmp/{f}', '/tmp/track.mp3')
-                        break
-            if not os.path.getsize('/tmp/track.mp3') > 0:
-                raise Exception('empty file')
-            wr('Audio ready')
-        except Exception as e:
-            wr(f'Audio download failed: {e}')
-            if not stream_active:
-                break
-            time.sleep(5)
+        tracks = scrape_tracks(source)
+        if not tracks:
+            wr('No tracks found, retrying in 30s...')
+            time.sleep(30)
             continue
 
-        af = f'volume={volume}'
-        if pitch_enabled:
-            af += f',asetrate=46000,aresample={sample_rate}'
+        playlist_path = '/tmp/playlist.txt'
+        with open(playlist_path, 'w') as f:
+            for t in tracks:
+                f.write(f"file '{t}'\n")
+        wr(f'Generated playlist with {len(tracks)} tracks (001 → {os.path.basename(tracks[-1])})')
 
-        wr('Starting ffmpeg...')
+        wr('Starting ffmpeg with playlist...')
         cmd = ['ffmpeg', '-nostdin', '-re',
-            '-stream_loop', '-1', '-i', '/tmp/bg.mp4',
-            '-stream_loop', '-1', '-i', '/tmp/track.mp3',
-            '-map', '0:v', '-map', '1:a',
+            '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+            '-stream_loop', '-1',
+            '-f', 'concat', '-safe', '0',
+            '-i', playlist_path,
+            '-i', '/tmp/bg.mp4',
+            '-map', '1:v', '-map', '0:a',
             '-c:v', 'copy',
             '-af', af,
             '-ar', sample_rate,
             '-c:a', 'aac', '-b:a', bitrate,
             '-rtmp_live', 'live',
             '-f', 'flv', output]
-        wr(f'ffmpeg: -c:v copy -c:a aac -b:a {bitrate}')
+        wr(f'ffmpeg: concat playlist, -c:v copy -c:a aac -b:a {bitrate}')
 
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -150,7 +165,7 @@ def bg_loop(cfg):
         ffmpeg_proc = None
         if not stream_active:
             break
-        wr('Restarting audio loop...')
+        wr('Playlist ended, rescraping and restarting...')
         time.sleep(2)
 
     wr('Stream stopped')
