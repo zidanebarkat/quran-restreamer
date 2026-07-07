@@ -409,14 +409,22 @@ h1 small{font-size:13px;color:#8b949e;font-weight:400}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
     <div>
       <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Background Video</label>
-      <div style="background:#000;border-radius:6px;overflow:hidden;max-height:240px">
-        <video id="bgPreview" controls muted loop style="width:100%;max-height:240px;display:block"
+      <div style="background:#000;border-radius:6px;overflow:hidden;max-height:200px">
+        <video id="bgPreview" controls muted loop style="width:100%;max-height:200px;display:block"
           poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect fill='%23161b22' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' fill='%238b949e' font-family='sans-serif' font-size='14' text-anchor='middle' dy='.3em'%3ELoad preview%3C/text%3E%3C/svg%3E">
           Your browser doesn't support video.
         </video>
       </div>
-      <button class="btn btn-grey btn-sm" onclick="loadPreview()" style="margin-top:8px">▶ Load Preview</button>
+      <button class="btn btn-grey btn-sm" onclick="loadPreview()" style="margin-top:8px">▶ Load Video</button>
       <span id="previewInfo" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
+      <div style="margin-top:10px">
+        <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:4px">Audio Preview (first track)</label>
+        <audio id="audioPreview" controls style="width:100%" preload="none">
+          Your browser doesn't support audio.
+        </audio>
+        <button class="btn btn-grey btn-sm" onclick="loadAudioPreview()" style="margin-top:4px">🔊 Load Audio</button>
+        <span id="audioInfo" style="font-size:12px;color:#8b949e;margin-left:8px"></span>
+      </div>
     </div>
     <div>
       <label style="font-size:13px;color:#8b949e;display:block;margin-bottom:6px">Audio Tracks</label>
@@ -508,6 +516,17 @@ function loadPreview() {
     vid.src = d.bg_direct || d.bg_url;
     vid.play().catch(()=>{});
     info.textContent = d.total_tracks+' tracks · '+d.first_track+' ('+(d.duration_s||'?')+'s)';
+  }).catch(e=>{ info.textContent = 'Failed'; });
+}
+function loadAudioPreview() {
+  const aud = document.getElementById('audioPreview');
+  const info = document.getElementById('audioInfo');
+  info.textContent = 'Loading...';
+  fetch('/preview').then(r=>r.json()).then(d=>{
+    if(!d.ok) { info.textContent = 'Error: '+d.error; return; }
+    aud.src = d.first_url;
+    aud.play().catch(()=>{});
+    info.textContent = d.first_track;
   }).catch(e=>{ info.textContent = 'Failed'; });
 }
 function scanTracks() {
