@@ -5,6 +5,8 @@ BG_URL="${BG_URL:-https://assets.mixkit.co/videos/22728/22728-720.mp4}"
 
 echo "[quran] Starting..."
 echo "[quran] PLAYLIST_URL=$PLAYLIST_URL"
+echo "[quran] Waiting 10s for old connections to close..."
+sleep 10
 
 [ -z "$OUTPUT_URL" ] && { echo "Missing OUTPUT_URL"; exit 1; }
 
@@ -52,7 +54,8 @@ while true; do
         -stream_loop -1 -i /tmp/track.mp3 \
         -map 0:v -map 1:a \
         -c:v copy \
-        -c:a aac -b:a 128k \
+        -af "volume=1.5,asetrate=46000,aresample=44100" \
+        -ar 44100 -c:a aac -b:a 192k \
         -rtmp_live live \
         -f flv \
         "$OUTPUT_URL" \
